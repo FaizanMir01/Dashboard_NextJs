@@ -12,15 +12,18 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+import { Check, ChevronsUpDown } from "lucide-react"
+import { cn } from "@/lib/utils"
+import { Checkbox } from "@/components/ui/checkbox"
 
 // Import the JSON data
 import salesData from '@/data/sales_data.json'
 
 interface SaleData {
-  paymentId: string;
-  outletId: string;
+  paymentId: number;
+  outletId: number;
   saleDate: string;
   saleTime: string;
   product: string;
@@ -34,6 +37,11 @@ interface SaleData {
 
 export default function Dashboard() {
   const [data, setData] = useState<SaleData[]>([])
+  const [filteredData, setFilteredData] = useState<SaleData[]>([])
+  const [fromDate, setFromDate] = useState('')
+  const [toDate, setToDate] = useState('')
+  const [selectedProducts, setSelectedProducts] = useState<string[]>([])
+  const [selectedZones, setSelectedZones] = useState<string[]>([])
   const chartRefs = {
     map: useRef<HTMLDivElement>(null),
     timewiseSales: useRef<HTMLDivElement>(null),
@@ -43,351 +51,474 @@ export default function Dashboard() {
     salesAvg: useRef<HTMLDivElement>(null),
     discountAvg: useRef<HTMLDivElement>(null),
     quantityAvg: useRef<HTMLDivElement>(null),
-    
   }
 
   useEffect(() => {
     setData(salesData as SaleData[])
+    setFilteredData(salesData as SaleData[])
   }, [])
 
-useEffect(() => {
-    if (data.length === 0 || Object.values(chartRefs).some(ref => !ref.current)) return;
-  
+  useEffect(() => {
+    if (filteredData.length === 0 || Object.values(chartRefs).some(ref => !ref.current)) return;
+
     const roots = Object.fromEntries(
       Object.entries(chartRefs).map(([key, ref]) => [
         key,
         am5.Root.new(ref.current!),
       ])
     );
-  
+
     Object.values(roots).forEach((root) => {
       root.setThemes([am5themes_Animated.new(root)]);
     });
-  
+
     // Calculate averages and maximums for gauge charts
-    const salesAvg = calculateAverage(data, 'amount');
-    const discountAvg = calculateAverage(data, 'discount');
-    const quantityAvg = calculateAverage(data, 'quantity');
+    const salesAvg = calculateAverage(filteredData, 'amount');
+    const discountAvg = calculateAverage(filteredData, 'discount');
+    const quantityAvg = calculateAverage(filteredData, 'quantity');
 
-    const maxSales = Math.max(...data.map(item => item.amount));
-    const maxDiscount = Math.max(...data.map(item => item.discount));
-    const maxQuantity = Math.max(...data.map(item => item.quantity));
+    const maxSales = Math.max(...filteredData.map(item => item.amount));
+    const maxDiscount = Math.max(...filteredData.map(item => item.discount));
+    const maxQuantity = Math.max(...filteredData.map(item => item.quantity));
 
-    createIndiaMap(roots.map, data);
-    createTimewiseSalesChart(roots.timewiseSales, data);
-    createProductDiscountwiseChart(roots.productDiscountwise, data);
-    createProductwiseQtyChart(roots.productwiseQty, data);
-    createProductwiseDiscountChart(roots.productwiseDiscount, data);
+    createIndiaMap(roots.map, filteredData);
+    createTimewiseSalesChart(roots.timewiseSales, filteredData);
+    createProductDiscountwiseChart(roots.productDiscountwise, filteredData);
+    createProductwiseQtyChart(roots.productwiseQty, filteredData);
+    createProductwiseDiscountChart(roots.productwiseDiscount, filteredData);
     
     // Create gauge charts with appropriate maximums
     createGaugeChart(roots.salesAvg, 'Sales Avg', salesAvg, maxSales);
     createGaugeChart(roots.discountAvg, 'Discount Avg', discountAvg, maxDiscount);
     createGaugeChart(roots.quantityAvg, 'Quantity Avg', quantityAvg, maxQuantity);
-  
+
     return () => {
       Object.values(roots).forEach((root) => root.dispose());
     };
-  }, [data]);
+  }, [filteredData]);
 
   const calculateAverage = (data: SaleData[], field: keyof SaleData) => {
     if (data.length === 0) return 0;
     const sum = data.reduce((acc, item) => acc + Number(item[field]), 0);
     return Number((sum / data.length).toFixed(2));
   };
-  const totalSales = data.reduce((acc, item) => acc + item.amount, 0)
-  const totalDiscount = data.reduce((acc, item) => acc + item.discount, 0)
-  const totalQuantity = data.reduce((acc, item) => acc + item.quantity, 0)
 
-  const FilterPanel = () => (
-    <Card className="h-full">
-      <CardHeader>
-        <CardTitle>Filters</CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        <div className="space-y-2">
-          <label className="text-sm font-medium">From Datetime</label>
-          <Input type="datetime-local" className="w-full" />
-        </div>
-        <div className="space-y-2">
-          <label className="text-sm font-medium">To Datetime</label>
-          <Input type="datetime-local" className="w-full" />
-        </div>
-        <div className="space-y-2">
-          <label className="text-sm font-medium">Product</label>
-          <Select>
-            <SelectTrigger>
-              <SelectValue placeholder="Select Product" />
-            </SelectTrigger>
-            <SelectContent>
-              {Array.from(new Set(data.map(item => item.product))).map(product => (
-                <SelectItem key={product} value={product}>{product}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-        <div className="space-y-2">
-          <label className="text-sm font-medium">Zone</label>
-          <Select>
-            <SelectTrigger>
-              <SelectValue placeholder="Select Subzone" />
-            </SelectTrigger>
-            <SelectContent>
-              {Array.from(new Set(data.map(item => item.subzone))).map(subzone => (
-                <SelectItem key={subzone} value={subzone}>{subzone}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-        <Button className="w-full">Search</Button>
-      </CardContent>
-    </Card>
-  )
+  const totalSales = filteredData.reduce((acc, item) => acc + item.amount, 0)
+  const totalDiscount = filteredData.reduce((acc, item) => acc + item.discount, 0)
+  const totalQuantity = filteredData.reduce((acc, item) => acc + item.quantity, 0)
+
+  const handleFilter = () => {
+    let filtered = data;
+
+    if (fromDate) {
+      filtered = filtered.filter(item => new Date(item.saleDate) >= new Date(fromDate));
+    }
+
+    if (toDate) {
+      filtered = filtered.filter(item => new Date(item.saleDate) <= new Date(toDate));
+    }
+
+    if (selectedProducts.length > 0) {
+      filtered = filtered.filter(item => selectedProducts.includes(item.product));
+    }
+
+    if (selectedZones.length > 0) {
+      filtered = filtered.filter(item => selectedZones.includes(item.subzone));
+    }
+
+    setFilteredData(filtered);
+  }
+
+  const MultiSelect = ({ options, selected, setSelected, placeholder }) => {
+    const [open, setOpen] = useState(false)
+
+    return (
+      <Popover open={open} onOpenChange={setOpen}>
+        <PopoverTrigger asChild>
+          <Button
+            variant="outline"
+            role="combobox"
+            aria-expanded={open}
+            className="w-full justify-between"
+          >
+            {selected.length > 0
+              ? `${selected.length} selected`
+              : placeholder}
+            <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+          </Button>
+        </PopoverTrigger>
+        <PopoverContent className="w-full p-0">
+          <div className="max-h-60 overflow-auto p-1">
+            {options.map((option) => (
+              <div key={option} className="flex items-center space-x-2 p-2">
+                <Checkbox
+                  id={option}
+                  checked={selected.includes(option)}
+                  onCheckedChange={(checked) => {
+                    setSelected(
+                      checked
+                        ? [...selected, option]
+                        : selected.filter((item) => item !== option)
+                    )
+                  }}
+                />
+                <label
+                  htmlFor={option}
+                  className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
+                >
+                  {option}
+                </label>
+              </div>
+            ))}
+          </div>
+        </PopoverContent>
+      </Popover>
+    )
+  }
+
+  const FilterPanel = () => {
+    const products = Array.from(new Set(data.map(item => item.product)));
+    const zones = Array.from(new Set(data.map(item => item.subzone)));
+
+    return (
+      <Card className="">
+        <CardHeader>
+          <CardTitle>Filters</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="space-y-2">
+            <label className="text-sm font-medium">From Date</label>
+            <Input type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} className="w-full" />
+          </div>
+          <div className="space-y-2">
+            <label className="text-sm font-medium">To Date</label>
+            <Input type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} className="w-full" />
+          </div>
+          <div className="space-y-2">
+            <label className="text-sm font-medium">Products</label>
+            <MultiSelect
+              options={products}
+              selected={selectedProducts}
+              setSelected={setSelectedProducts}
+              placeholder="Select products..."
+            />
+          </div>
+          <div className="space-y-2">
+            <label className="text-sm font-medium">Zones</label>
+            <MultiSelect
+              options={zones}
+              selected={selectedZones}
+              setSelected={setSelectedZones}
+              placeholder="Select zones..."
+            />
+          </div>
+          <Button className="w-full" onClick={handleFilter}>Apply Filters</Button>
+        </CardContent>
+      </Card>
+    )
+  }
 
   return (
-    <Tabs defaultValue="dashboard" className="w-full">
-      <TabsList className="mb-4">
-        <TabsTrigger value="dashboard">Dashboard</TabsTrigger>
-        <TabsTrigger value="report">Report</TabsTrigger>
-      </TabsList>
+    <div className="px-2 py-4">
+      <h1 className="text-3xl font-bold mb-8">Sales Dashboard</h1>
+      <Tabs defaultValue="dashboard" className="w-full">
+        <TabsList className="mb-8">
+          <TabsTrigger value="dashboard">Dashboard</TabsTrigger>
+          <TabsTrigger value="report">Report</TabsTrigger>
+        </TabsList>
 
-      <TabsContent value="dashboard">
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-          <div className="md:col-span-3 space-y-4">
-            
+        <TabsContent value="dashboard">
+          <div className="grid grid-cols-1 lg:grid-cols-4 gap-8">
+            <div className="lg:col-span-3 space-y-8">
+              <div className="grid grid-cols-1 lg:grid-cols-4 gap-8">
+                <Card className="lg:col-span-2">
+                  <CardHeader>
+                    <CardTitle>India Map</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div ref={chartRefs.map} style={{ width: '100%', height: '400px' }}></div>
+                  </CardContent>
+                </Card>
+                <Card className='col-span-2'>
+                  <CardContent className="p-6 space-y-6">
+                    <div>
+                      <h3 className="text-lg font-semibold mb-2">Sales</h3>
+                      <div className="flex justify-between items-center mb-2">
+                        <span className="text-2xl font-bold">{totalSales.toFixed(2)}</span>
+                      </div>
+                      <div className="w-full bg-muted h-4 rounded-full">
+                        <div className="bg-primary h-4 rounded-full" style={{ width: `${(totalSales / (totalSales * 1.5)) * 100}%` }}></div>
+                      </div>
+                    </div>
+                    <div>
+                      <h3 className="text-lg font-semibold mb-2">Discount</h3>
+                      <div className="flex justify-between items-center mb-2">
+                        <span className="text-2xl font-bold">{totalDiscount.toFixed(2)}</span>
+                      </div>
+                      <div className="w-full bg-muted h-4 rounded-full">
+                        <div className="bg-primary h-4 rounded-full" style={{ width: `${(totalDiscount / totalSales) * 100}%` }}></div>
+                      </div>
+                    </div>
+                    <div>
+                      <h3 className="text-lg font-semibold mb-2">Quantity</h3>
+                      <div className="flex justify-between items-center mb-2">
+                        <span className="text-2xl font-bold">{totalQuantity}</span>
+                      </div>
+                      <div className="w-full bg-muted h-4 rounded-full">
+                        <div className="bg-primary h-4 rounded-full" style={{ width: `${(totalQuantity / (totalQuantity * 1.5)) * 100}%` }}></div>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              </div>
 
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-              <Card>
-                <CardHeader>
-                  <CardTitle>India Map</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div ref={chartRefs.map} style={{ width: '100%', height: '400px' }}></div>
-                </CardContent>
-              </Card>
-              <div className="grid grid-cols-1 col-span-2 gap-4">
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
                 <Card>
                   <CardHeader>
                     <CardTitle>Timewise Sales</CardTitle>
                   </CardHeader>
                   <CardContent>
-                    <div ref={chartRefs.timewiseSales} style={{ width: '100%', height: '200px' }}></div>
+                    <div ref={chartRefs.timewiseSales} style={{ width: '100%', height: '300px' }}></div>
                   </CardContent>
                 </Card>
                 <Card>
                   <CardHeader>
-                    <CardTitle>Product discountwise sales</CardTitle>
+                    <CardTitle>Product Discountwise Sales</CardTitle>
                   </CardHeader>
                   <CardContent>
-                    <div ref={chartRefs.productDiscountwise} style={{ width: '100%', height: '200px' }}></div>
+                    <div ref={chartRefs.productDiscountwise} style={{ width: '100%', height: '300px' }}></div>
                   </CardContent>
                 </Card>
               </div>
-              <div className="grid grid-cols-1 sm:grid-cols-1 col-span-2 gap-4">
-              <Card>
-                <CardContent className="pt-6">
-                  <div className="flex justify-between items-center mb-2">
-                    <span>Sales</span>
-                    <span className="text-2xl font-bold">{totalSales.toFixed(2)}</span>
-                  </div>
-                  <div className="w-full bg-muted h-4 rounded-full">
-                    <div className="bg-[#2e91e2] h-4  rounded-full" style={{ width: `${(totalSales / (totalSales * 1.5)) * 100}%` }}></div>
-                  </div>
-                </CardContent>
-                <CardContent className="pt-6">
-                  <div className="flex justify-between items-center mb-2">
-                    <span>Discount</span>
-                    <span className="text-2xl font-bold">{totalDiscount.toFixed(2)}</span>
-                  </div>
-                  <div className="w-full bg-muted h-4 rounded-full">
-                    <div className="bg-[#2e91e2] h-4 rounded-full" style={{ width: `${(totalDiscount / totalSales) * 100}%` }}></div>
-                  </div>
-                </CardContent>
-                <CardContent className="pt-6">
-                  <div className="flex justify-between items-center mb-2">
-                    <span>Qty</span>
-                    <span className="text-2xl font-bold">{totalQuantity}</span>
-                  </div>
-                  <div className="w-full bg-muted h-4 rounded-full">
-                    <div className="bg-[#2e91e2] h-4 rounded-full" style={{ width: `${(totalQuantity / (totalQuantity * 1.5)) * 100}%` }}></div>
-                  </div>
-                </CardContent>
-              </Card>
-            </div>
-            </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <Card>
-                <CardHeader>
-                  <CardTitle>Productwise Qty</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div ref={chartRefs.productwiseQty} style={{ width: '100%', height: '200px' }}></div>
-                </CardContent>
-              </Card>
-              <Card>
-                <CardHeader>
-                  <CardTitle>Productwise Discount</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div ref={chartRefs.productwiseDiscount} style={{ width: '100%', height: '200px' }}></div>
-                </CardContent>
-              </Card>
-            </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-              <Card>
-                <CardHeader>
-                  <CardTitle>Sales Avg</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div ref={chartRefs.salesAvg} style={{ width: '100%', height: '150px' }}></div>
-                </CardContent>
-              </Card>
-              <Card>
-                <CardHeader>
-                  <CardTitle>Discount Avg</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div ref={chartRefs.discountAvg} style={{ width: '100%', height: '150px' }}></div>
-                </CardContent>
-              </Card>
-              <Card>
-                <CardHeader>
-                  <CardTitle>Quantity Avg</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div ref={chartRefs.quantityAvg} style={{ width: '100%', height: '150px' }}></div>
-                </CardContent>
-              </Card>
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Productwise Quantity</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div ref={chartRefs.productwiseQty} style={{ width: '100%', height: '300px' }}></div>
+                  </CardContent>
+                </Card>
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Productwise Discount</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div ref={chartRefs.productwiseDiscount} style={{ width: '100%', height: '300px' }}></div>
+                  </CardContent>
+                </Card>
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Sales Average</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div ref={chartRefs.salesAvg} style={{ width: '100%', height: '200px' }}></div>
+                  </CardContent>
+                </Card>
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Discount Average</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div ref={chartRefs.discountAvg} style={{ width: '100%', height: '200px' }}></div>
+                  </CardContent>
+                </Card>
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Quantity Average</CardTitle>
+                  
+                  </CardHeader>
+                  <CardContent>
+                    <div ref={chartRefs.quantityAvg} style={{ width: '100%', height: '200px' }}></div>
+                  </CardContent>
+                </Card>
+              </div>
+            </div>
+            
+            <div className="lg:col-span-1">
+              <FilterPanel />
             </div>
           </div>
-          
-          <div className="md:col-span-1">
-            <FilterPanel />
-          </div>
-        </div>
-      </TabsContent>
+        </TabsContent>
 
-      <TabsContent value="report">
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-          <div className="md:col-span-3 space-y-4">
-            <Card>
-              <CardHeader>
-                <CardTitle>Report</CardTitle>
-              </CardHeader>
-              <CardContent className="overflow-auto">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Payment ID</TableHead>
-                      <TableHead>Outlet ID</TableHead>
-                      <TableHead>Sale Date</TableHead>
-                      <TableHead>Sale Time</TableHead>
-                      <TableHead>Product</TableHead>
-                      <TableHead>SKU</TableHead>
-                      <TableHead>Quantity</TableHead>
-                      <TableHead>Unit Price</TableHead>
-                      <TableHead>Amount</TableHead>
-                      <TableHead>Discount</TableHead>
-                      <TableHead>Subzone</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {data.map((item, index) => (
-                      <TableRow key={index}>
-                        <TableCell>{item.paymentId}</TableCell>
-                        <TableCell>{item.outletId}</TableCell>
-                        <TableCell>{item.saleDate}</TableCell>
-                        <TableCell>{item.saleTime}</TableCell>
-                        <TableCell>{item.product}</TableCell>
-                        <TableCell>{item.sku}</TableCell>
-                        <TableCell>{item.quantity}</TableCell>
-                        <TableCell>${item.unitPrice.toFixed(2)}</TableCell>
-                        <TableCell>${item.amount.toFixed(2)}</TableCell>
-                        <TableCell>${item.discount.toFixed(2)}</TableCell>
-                        <TableCell>{item.subzone}</TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </CardContent>
-            </Card>
-
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        
+        <TabsContent value="report">
+          <div className="grid grid-cols-1 lg:grid-cols-4 gap-8">
+            <div className="lg:col-span-3">
               <Card>
                 <CardHeader>
-                  <CardTitle>Product Sales</CardTitle>
+                  <CardTitle>Sales Report</CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <div style={{ width: '100%', height: '200px' }}></div>
+                  <div className="overflow-x-auto">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Payment ID</TableHead>
+                          <TableHead>Outlet ID</TableHead>
+                          <TableHead>Sale Date</TableHead>
+                          <TableHead>Sale Time</TableHead>
+                          <TableHead>Product</TableHead>
+                          <TableHead>SKU</TableHead>
+                          <TableHead>Quantity</TableHead>
+                          <TableHead>Unit Price</TableHead>
+                          <TableHead>Amount</TableHead>
+                          <TableHead>Discount</TableHead>
+                          <TableHead>Subzone</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {filteredData.map((item, index) => (
+                          <TableRow key={index}>
+                            <TableCell>{item.paymentId}</TableCell>
+                            <TableCell>{item.outletId}</TableCell>
+                            <TableCell>{item.saleDate}</TableCell>
+                            <TableCell>{item.saleTime}</TableCell>
+                            <TableCell>{item.product}</TableCell>
+                            <TableCell>{item.sku}</TableCell>
+                            <TableCell>{item.quantity}</TableCell>
+                            <TableCell>${item.unitPrice.toFixed(2)}</TableCell>
+                            <TableCell>${item.amount.toFixed(2)}</TableCell>
+                            <TableCell>${item.discount.toFixed(2)}</TableCell>
+                            <TableCell>{item.subzone}</TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
                 </CardContent>
               </Card>
+              
+              {/* New charts below the table */}
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8 mt-8">
               <Card>
-                <CardHeader>
-                  <CardTitle>Product qty</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div style={{ width: '100%', height: '200px' }}></div>
-                </CardContent>
-              </Card>
-              <Card>
-                <CardHeader>
-                  <CardTitle>Product wise discount</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div style={{ width: '100%', height: '200px' }}></div>
-                </CardContent>
-              </Card>
+                  <CardHeader>
+                    <CardTitle>Productwise Quantity</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div ref={chartRefs.productwiseQty} style={{ width: '100%', height: '300px' }}></div>
+                  </CardContent>
+                </Card>
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Productwise Discount</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div ref={chartRefs.productwiseDiscount} style={{ width: '100%', height: '300px' }}></div>
+                  </CardContent>
+                </Card>
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Product Discount Sales</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div ref={chartRefs.productDiscountwise} style={{ width: '100%', height: '300px' }}></div>
+                  </CardContent>
+                </Card>
+              </div>
+            </div>
+            
+            <div className="lg:col-span-1">
+              <FilterPanel />
             </div>
           </div>
-          
-          <div className="md:col-span-1">
-            <FilterPanel />
-          </div>
-        </div>
-      </TabsContent>
-    </Tabs>
+        </TabsContent>
+      </Tabs>
+    </div>
   )
 }
-
 function createIndiaMap(root: am5.Root, data: SaleData[]) {
+  // Create chart instance
   const chart = root.container.children.push(
     am5map.MapChart.new(root, {
       panX: "translateX",
       panY: "translateY",
-      wheelY: "zoom"
+      wheelY: "zoom",
+      projection: am5map.geoMercator() // Add projection for proper map rendering
     })
   );
 
-  // Create map polygon series
+  // Create polygon series
   const polygonSeries = chart.series.push(
     am5map.MapPolygonSeries.new(root, {
       geoJSON: indiaLow,
+      valueField: "value", // Add valueField for heat rules
       fill: am5.color(0x67B7DC),
       stroke: am5.color(0xFFFFFF)
     })
   );
 
-  // Add heat rules based on sales data
-  const subzoneData = Object.entries(
-    data.reduce((acc: { [key: string]: number }, item) => {
-      acc[item.subzone] = (acc[item.subzone] || 0) + item.amount;
-      return acc;
-    }, {})
-  ).map(([subzone, amount]) => ({ subzone, amount }));
+  // Process data for polygons
+  const subzoneData = data.reduce((acc: { [key: string]: number }, item) => {
+    acc[item.subzone] = (acc[item.subzone] || 0) + item.amount;
+    return acc;
+  }, {});
 
+  // Set data to polygons
+  polygonSeries.data.setAll(
+    polygonSeries.dataItems.map(dataItem => {
+      const subzone = dataItem.get("id");
+      return {
+        id: subzone,
+        value: subzoneData[subzone] || 0,
+        subzone: subzone,
+        amount: subzoneData[subzone] || 0
+      };
+    })
+  );
+
+  // Configure heat rules
   polygonSeries.set("heatRules", [{
     target: polygonSeries.mapPolygons.template,
     dataField: "value",
     min: am5.color(0x67B7DC),
-    max: am5.color(0x0D47A1)
+    max: am5.color(0x0D47A1),
+    key: "fill"  // Specify the property to animate
   }]);
 
-  // Add hover state
+  // Configure polygon template
   const polygonTemplate = polygonSeries.mapPolygons.template;
+
+  // Create and configure tooltip
+  const tooltip = am5.Tooltip.new(root, {
+    getFillFromSprite: true,
+    labelText: "[bold]{subzone}[/]\nSales: {amount}"
+  });
+
+  polygonTemplate.set("tooltipText", "{subzone}: {amount}"); // Set tooltip text format
+  polygonTemplate.set("tooltip", tooltip);
+  
+  // Configure hover state
   polygonTemplate.states.create("hover", {
     fill: am5.color(0x297FB8)
   });
+
+  // Add zoom control
+  chart.set("zoomControl", am5map.ZoomControl.new(root, {
+    x: am5.percent(100),
+    centerX: am5.percent(100),
+    y: am5.percent(0),
+    centerY: am5.percent(0)
+  }));
+
+  // Make map pan and zoom to show all visible data
+  polygonSeries.events.on("datavalidated", () => {
+    chart.zoomToGeoPoint({
+      latitude: 20,
+      longitude: 77
+    }, 3.5);
+  });
+
+  // Clean up function
+  return () => {
+    root.dispose();
+  };
 }
+
 
 function createTimewiseSalesChart(root: am5.Root, data: SaleData[]) {
   const chart = root.container.children.push(
@@ -443,7 +574,7 @@ function createProductDiscountwiseChart(root: am5.Root, data: SaleData[]) {
       panX: true,
       panY: true,
       wheelX: "panX",
-      wheelY: "zoomX"
+      wheelY: "zoomX",
     })
   );
 
@@ -708,6 +839,269 @@ function createGaugeChart(root: am5.Root, title: string, value: number, max: num
 
   // Animate series on load
   series.appear(1000, 100);
+
+  return chart;
+}
+function createProductwiseSalesChart(root: am5.Root, data: SaleData[]) {
+  // Create chart
+  const chart = root.container.children.push(
+    am5xy.XYChart.new(root, {
+      panY: true,
+      wheelY: "zoomY",
+      layout: root.verticalLayout,
+      maxTooltipDistance: 0
+    })
+  );
+
+  // Create axes
+  const xAxis = chart.xAxes.push(
+    am5xy.CategoryAxis.new(root, {
+      categoryField: "product",
+      renderer: am5xy.AxisRendererX.new(root, {
+        minGridDistance: 30,
+        cellStartLocation: 0.1,
+        cellEndLocation: 0.9
+      }),
+      tooltip: am5.Tooltip.new(root, {})
+    })
+  );
+
+  const yAxis = chart.yAxes.push(
+    am5xy.ValueAxis.new(root, {
+      renderer: am5xy.AxisRendererY.new(root, {})
+    })
+  );
+
+  // Create series
+  const series = chart.series.push(
+    am5xy.ColumnSeries.new(root, {
+      name: "Sales",
+      xAxis: xAxis,
+      yAxis: yAxis,
+      valueYField: "amount",
+      categoryXField: "product",
+      tooltip: am5.Tooltip.new(root, {
+        labelText: "Sales: ${valueY}"
+      })
+    })
+  );
+
+  // Style the columns
+  series.columns.template.setAll({
+    cornerRadiusTL: 3,
+    cornerRadiusTR: 3,
+    strokeOpacity: 0,
+    fillGradient: am5.LinearGradient.new(root, {
+      stops: [{
+        color: am5.color(0x67B7DC)
+      }, {
+        color: am5.color(0x297FB8)
+      }],
+      rotation: 90
+    })
+  });
+
+  // Process and set data
+  const processedData = Object.entries(
+    data.reduce((acc: { [key: string]: number }, item) => {
+      acc[item.product] = (acc[item.product] || 0) + item.amount;
+      return acc;
+    }, {})
+  )
+    .map(([product, amount]) => ({ 
+      product, 
+      amount: Number(amount.toFixed(2))
+    }))
+    .sort((a, b) => b.amount - a.amount);
+
+  xAxis.data.setAll(processedData);
+  series.data.setAll(processedData);
+
+  // Add cursor
+  chart.set("cursor", am5xy.XYCursor.new(root, {
+    behavior: "none",
+    xAxis: xAxis,
+    yAxis: yAxis
+  }));
+
+  // Configure axis labels
+  xAxis.get("renderer").labels.template.setAll({
+    oversizedBehavior: "wrap",
+    maxWidth: 150,
+    rotation: -45,
+    centerY: am5.p50,
+    centerX: am5.p100,
+    paddingRight: 15
+  });
+
+  // Animate
+  series.appear(1000);
+  chart.appear(1000, 100);
+
+  return chart;
+}
+
+function createProductwiseQuantityPieChart(root: am5.Root, data: SaleData[]) {
+  // Create chart
+  const chart = root.container.children.push(
+    am5percent.PieChart.new(root, {
+      layout: root.verticalLayout,
+      innerRadius: am5.percent(50)
+    })
+  );
+
+  // Create series
+  const series = chart.series.push(
+    am5percent.PieSeries.new(root, {
+      valueField: "quantity",
+      categoryField: "product",
+      alignLabels: false,
+      legendValueText: "{value}",
+      legendLabelText: "{category}",
+      tooltip: am5.Tooltip.new(root, {
+        labelText: "{category}: {value}"
+      })
+    })
+  );
+
+  // Customize slices
+  series.slices.template.setAll({
+    strokeWidth: 2,
+    stroke: am5.color(0xffffff)
+  });
+
+  // Add legend
+  const legend = chart.children.push(
+    am5.Legend.new(root, {
+      centerX: am5.percent(50),
+      x: am5.percent(50),
+      marginTop: 15,
+      marginBottom: 15
+    })
+  );
+
+  legend.data.setAll(series.dataItems);
+
+  // Process data
+  const processedData = Object.entries(
+    data.reduce((acc: { [key: string]: number }, item) => {
+      acc[item.product] = (acc[item.product] || 0) + item.quantity;
+      return acc;
+    }, {})
+  )
+    .map(([product, quantity]) => ({
+      product,
+      quantity: Number(quantity)
+    }))
+    .sort((a, b) => b.quantity - a.quantity);
+
+  // Set data
+  series.data.setAll(processedData);
+
+  // Animate
+  series.appear(1000, 100);
+
+  return chart;
+}
+
+function createProductwiseDiscountBarChart(root: am5.Root, data: SaleData[]) {
+  // Create chart
+  const chart = root.container.children.push(
+    am5xy.XYChart.new(root, {
+      panX: true,
+      panY: false,
+      wheelX: "panX",
+      wheelY: "none",
+      layout: root.verticalLayout
+    })
+  );
+
+  // Create axes
+  const xAxis = chart.xAxes.push(
+    am5xy.CategoryAxis.new(root, {
+      categoryField: "product",
+      renderer: am5xy.AxisRendererX.new(root, {
+        minGridDistance: 30
+      }),
+      tooltip: am5.Tooltip.new(root, {})
+    })
+  );
+
+  const yAxis = chart.yAxes.push(
+    am5xy.ValueAxis.new(root, {
+      renderer: am5xy.AxisRendererY.new(root, {}),
+      numberFormat: "${value}"
+    })
+  );
+
+  // Create series
+  const series = chart.series.push(
+    am5xy.ColumnSeries.new(root, {
+      name: "Discount",
+      xAxis: xAxis,
+      yAxis: yAxis,
+      valueYField: "discount",
+      categoryXField: "product",
+      tooltip: am5.Tooltip.new(root, {
+        labelText: "Discount: ${valueY}"
+      })
+    })
+  );
+
+  // Style columns
+  series.columns.template.setAll({
+    tooltipY: 0,
+    tooltipText: "{categoryX}: ${valueY}",
+    cornerRadiusTL: 5,
+    cornerRadiusTR: 5,
+    strokeOpacity: 0,
+    fillGradient: am5.LinearGradient.new(root, {
+      stops: [{
+        color: am5.color(0xFF8C00)
+      }, {
+        color: am5.color(0xFFA500)
+      }],
+      rotation: 90
+    })
+  });
+
+  // Process data
+  const processedData = Object.entries(
+    data.reduce((acc: { [key: string]: number }, item) => {
+      acc[item.product] = (acc[item.product] || 0) + item.discount;
+      return acc;
+    }, {})
+  )
+    .map(([product, discount]) => ({
+      product,
+      discount: Number(discount.toFixed(2))
+    }))
+    .sort((a, b) => b.discount - a.discount);
+
+  // Set data
+  xAxis.data.setAll(processedData);
+  series.data.setAll(processedData);
+
+  // Configure axis labels
+  xAxis.get("renderer").labels.template.setAll({
+    oversizedBehavior: "wrap",
+    maxWidth: 120,
+    rotation: -45,
+    centerY: am5.p50,
+    centerX: am5.p100,
+    paddingRight: 15
+  });
+
+  // Add cursor
+  chart.set("cursor", am5xy.XYCursor.new(root, {
+    behavior: "none",
+    xAxis: xAxis,
+    yAxis: yAxis
+  }));
+
+  // Animate
+  series.appear(1000);
+  chart.appear(1000, 100);
 
   return chart;
 }
