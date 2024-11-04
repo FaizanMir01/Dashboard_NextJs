@@ -1,11 +1,10 @@
-"use client"
+'use client'
 
 import React, { useEffect, useRef, useState } from 'react'
 import * as am5 from '@amcharts/amcharts5'
 import * as am5map from '@amcharts/amcharts5/map'
 import * as am5xy from '@amcharts/amcharts5/xy'
 import * as am5percent from '@amcharts/amcharts5/percent'
-import * as am5radar from '@amcharts/amcharts5/radar'
 import am5themes_Animated from '@amcharts/amcharts5/themes/Animated'
 import indiaLow from '@amcharts/amcharts5-geodata/indiaLow'
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -15,7 +14,6 @@ import { Button } from "@/components/ui/button"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Check, ChevronsUpDown } from "lucide-react"
-import { cn } from "@/lib/utils"
 import { Checkbox } from "@/components/ui/checkbox"
 
 // Import the JSON data
@@ -42,6 +40,7 @@ export default function Dashboard() {
   const [toDate, setToDate] = useState('')
   const [selectedProducts, setSelectedProducts] = useState<string[]>([])
   const [selectedZones, setSelectedZones] = useState<string[]>([])
+  const [activeTab, setActiveTab] = useState("dashboard")
   const chartRefs = {
     map: useRef<HTMLDivElement>(null),
     timewiseSales: useRef<HTMLDivElement>(null),
@@ -51,7 +50,11 @@ export default function Dashboard() {
     salesAvg: useRef<HTMLDivElement>(null),
     discountAvg: useRef<HTMLDivElement>(null),
     quantityAvg: useRef<HTMLDivElement>(null),
+    reportProductwiseQty: useRef<HTMLDivElement>(null),
+    reportProductwiseDiscount: useRef<HTMLDivElement>(null),
+    reportProductDiscountwise: useRef<HTMLDivElement>(null),
   }
+  const chartRoots = useRef<{ [key: string]: am5.Root | null }>({})
 
   useEffect(() => {
     setData(salesData as SaleData[])
@@ -59,43 +62,58 @@ export default function Dashboard() {
   }, [])
 
   useEffect(() => {
-    if (filteredData.length === 0 || Object.values(chartRefs).some(ref => !ref.current)) return;
+    if (filteredData.length === 0) return;
 
-    const roots = Object.fromEntries(
-      Object.entries(chartRefs).map(([key, ref]) => [
-        key,
-        am5.Root.new(ref.current!),
-      ])
-    );
+    Object.entries(chartRefs).forEach(([key, ref]) => {
+      if (ref.current) {
+        if (chartRoots.current[key]) {
+          chartRoots.current[key]!.dispose()
+        }
+        
+        chartRoots.current[key] = am5.Root.new(ref.current)
+        chartRoots.current[key]!.setThemes([am5themes_Animated.new(chartRoots.current[key]!)])
 
-    Object.values(roots).forEach((root) => {
-      root.setThemes([am5themes_Animated.new(root)]);
-    });
-
-    // Calculate averages and maximums for gauge charts
-    const salesAvg = calculateAverage(filteredData, 'amount');
-    const discountAvg = calculateAverage(filteredData, 'discount');
-    const quantityAvg = calculateAverage(filteredData, 'quantity');
-
-    const maxSales = Math.max(...filteredData.map(item => item.amount));
-    const maxDiscount = Math.max(...filteredData.map(item => item.discount));
-    const maxQuantity = Math.max(...filteredData.map(item => item.quantity));
-
-    createIndiaMap(roots.map, filteredData);
-    createTimewiseSalesChart(roots.timewiseSales, filteredData);
-    createProductDiscountwiseChart(roots.productDiscountwise, filteredData);
-    createProductwiseQtyChart(roots.productwiseQty, filteredData);
-    createProductwiseDiscountChart(roots.productwiseDiscount, filteredData);
-    
-    // Create gauge charts with appropriate maximums
-    createGaugeChart(roots.salesAvg, 'Sales Avg', salesAvg, maxSales);
-    createGaugeChart(roots.discountAvg, 'Discount Avg', discountAvg, maxDiscount);
-    createGaugeChart(roots.quantityAvg, 'Quantity Avg', quantityAvg, maxQuantity);
+        switch (key) {
+          case 'map':
+            createIndiaMap(chartRoots.current[key]!, filteredData)
+            break
+          case 'timewiseSales':
+            createTimewiseSalesChart(chartRoots.current[key]!, filteredData)
+            break
+          case 'productDiscountwise':
+          case 'reportProductDiscountwise':
+            createProductDiscountwiseChart(chartRoots.current[key]!, filteredData)
+            break
+          case 'productwiseQty':
+          case 'reportProductwiseQty':
+            createProductwiseQtyChart(chartRoots.current[key]!, filteredData)
+            break
+          case 'productwiseDiscount':
+          case 'reportProductwiseDiscount':
+            createProductwiseDiscountChart(chartRoots.current[key]!, filteredData)
+            break
+          case 'salesAvg':
+            createGaugeChart(chartRoots.current[key]!, 'Sales Avg', calculateAverage(filteredData, 'amount'), Math.max(...filteredData.map(item => item.amount)))
+            break
+          case 'discountAvg':
+            createGaugeChart(chartRoots.current[key]!, 'Discount Avg', calculateAverage(filteredData, 'discount'), Math.max(...filteredData.map(item => item.discount)))
+            break
+          case 'quantityAvg':
+            createGaugeChart(chartRoots.current[key]!, 'Quantity Avg', calculateAverage(filteredData, 'quantity'), Math.max(...filteredData.map(item => item.quantity)))
+            break
+        }
+      }
+    })
 
     return () => {
-      Object.values(roots).forEach((root) => root.dispose());
-    };
-  }, [filteredData]);
+      Object.values(chartRoots.current).forEach(root => {
+        if (root) {
+          root.dispose()
+        }
+      })
+      chartRoots.current = {}
+    }
+  }, [filteredData, activeTab])
 
   const calculateAverage = (data: SaleData[], field: keyof SaleData) => {
     if (data.length === 0) return 0;
@@ -129,7 +147,12 @@ export default function Dashboard() {
     setFilteredData(filtered);
   }
 
-  const MultiSelect = ({ options, selected, setSelected, placeholder }) => {
+  const MultiSelect = ({ options, selected, setSelected, placeholder }: {
+    options: string[],
+    selected: string[],
+    setSelected: React.Dispatch<React.SetStateAction<string[]>>,
+    placeholder: string
+  }) => {
     const [open, setOpen] = useState(false)
 
     return (
@@ -221,7 +244,7 @@ export default function Dashboard() {
   return (
     <div className="px-2 py-4">
       <h1 className="text-3xl font-bold mb-8">Sales Dashboard</h1>
-      <Tabs defaultValue="dashboard" className="w-full">
+      <Tabs defaultValue="dashboard" className="w-full" onValueChange={setActiveTab}>
         <TabsList className="mb-8">
           <TabsTrigger value="dashboard">Dashboard</TabsTrigger>
           <TabsTrigger value="report">Report</TabsTrigger>
@@ -306,6 +329,7 @@ export default function Dashboard() {
                   </CardHeader>
                   <CardContent>
                     <div ref={chartRefs.productwiseDiscount} style={{ width: '100%', height: '300px' }}></div>
+                  
                   </CardContent>
                 </Card>
               </div>
@@ -330,7 +354,6 @@ export default function Dashboard() {
                 <Card>
                   <CardHeader>
                     <CardTitle>Quantity Average</CardTitle>
-                  
                   </CardHeader>
                   <CardContent>
                     <div ref={chartRefs.quantityAvg} style={{ width: '100%', height: '200px' }}></div>
@@ -345,7 +368,6 @@ export default function Dashboard() {
           </div>
         </TabsContent>
 
-        
         <TabsContent value="report">
           <div className="grid grid-cols-1 lg:grid-cols-4 gap-8">
             <div className="lg:col-span-3">
@@ -393,14 +415,13 @@ export default function Dashboard() {
                 </CardContent>
               </Card>
               
-              {/* New charts below the table */}
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8 mt-8">
-              <Card>
+                <Card>
                   <CardHeader>
                     <CardTitle>Productwise Quantity</CardTitle>
                   </CardHeader>
                   <CardContent>
-                    <div ref={chartRefs.productwiseQty} style={{ width: '100%', height: '300px' }}></div>
+                    <div ref={chartRefs.reportProductwiseQty} style={{ width: '100%', height: '300px' }}></div>
                   </CardContent>
                 </Card>
                 <Card>
@@ -408,7 +429,7 @@ export default function Dashboard() {
                     <CardTitle>Productwise Discount</CardTitle>
                   </CardHeader>
                   <CardContent>
-                    <div ref={chartRefs.productwiseDiscount} style={{ width: '100%', height: '300px' }}></div>
+                    <div ref={chartRefs.reportProductwiseDiscount} style={{ width: '100%', height: '300px' }}></div>
                   </CardContent>
                 </Card>
                 <Card>
@@ -416,7 +437,7 @@ export default function Dashboard() {
                     <CardTitle>Product Discount Sales</CardTitle>
                   </CardHeader>
                   <CardContent>
-                    <div ref={chartRefs.productDiscountwise} style={{ width: '100%', height: '300px' }}></div>
+                    <div ref={chartRefs.reportProductDiscountwise} style={{ width: '100%', height: '300px' }}></div>
                   </CardContent>
                 </Card>
               </div>
@@ -431,94 +452,59 @@ export default function Dashboard() {
     </div>
   )
 }
+
 function createIndiaMap(root: am5.Root, data: SaleData[]) {
-  // Create chart instance
   const chart = root.container.children.push(
     am5map.MapChart.new(root, {
       panX: "translateX",
       panY: "translateY",
-      wheelY: "zoom",
-      projection: am5map.geoMercator() // Add projection for proper map rendering
+      projection: am5map.geoMercator()
     })
   );
 
-  // Create polygon series
   const polygonSeries = chart.series.push(
     am5map.MapPolygonSeries.new(root, {
       geoJSON: indiaLow,
-      valueField: "value", // Add valueField for heat rules
-      fill: am5.color(0x67B7DC),
-      stroke: am5.color(0xFFFFFF)
+      valueField: "value",
+      calculateAggregates: true
     })
   );
 
-  // Process data for polygons
   const subzoneData = data.reduce((acc: { [key: string]: number }, item) => {
     acc[item.subzone] = (acc[item.subzone] || 0) + item.amount;
     return acc;
   }, {});
 
-  // Set data to polygons
   polygonSeries.data.setAll(
-    polygonSeries.dataItems.map(dataItem => {
-      const subzone = dataItem.get("id");
-      return {
-        id: subzone,
-        value: subzoneData[subzone] || 0,
-        subzone: subzone,
-        amount: subzoneData[subzone] || 0
-      };
-    })
+    Object.entries(subzoneData).map(([subzone, amount]) => ({
+      id: subzone,
+      value: amount
+    }))
   );
 
-  // Configure heat rules
   polygonSeries.set("heatRules", [{
     target: polygonSeries.mapPolygons.template,
     dataField: "value",
-    min: am5.color(0x67B7DC),
-    max: am5.color(0x0D47A1),
-    key: "fill"  // Specify the property to animate
+    min: am5.color(0xc7d2fe),
+    max: am5.color(0x3730a3),
+    key: "fill"
   }]);
 
-  // Configure polygon template
-  const polygonTemplate = polygonSeries.mapPolygons.template;
-
-  // Create and configure tooltip
-  const tooltip = am5.Tooltip.new(root, {
-    getFillFromSprite: true,
-    labelText: "[bold]{subzone}[/]\nSales: {amount}"
-  });
-
-  polygonTemplate.set("tooltipText", "{subzone}: {amount}"); // Set tooltip text format
-  polygonTemplate.set("tooltip", tooltip);
-  
-  // Configure hover state
-  polygonTemplate.states.create("hover", {
-    fill: am5.color(0x297FB8)
-  });
-
-  // Add zoom control
-  chart.set("zoomControl", am5map.ZoomControl.new(root, {
-    x: am5.percent(100),
-    centerX: am5.percent(100),
-    y: am5.percent(0),
-    centerY: am5.percent(0)
+  chart.set("zoomControl", am5map.ZoomControl.new(root, {}));
+  chart.chartContainer.set("background", am5.Rectangle.new(root, {
+    fill: am5.color(0xffffff),
+    fillOpacity: 1
   }));
+  chart.series.push(polygonSeries);
 
-  // Make map pan and zoom to show all visible data
-  polygonSeries.events.on("datavalidated", () => {
-    chart.zoomToGeoPoint({
-      latitude: 20,
-      longitude: 77
-    }, 3.5);
+  polygonSeries.mapPolygons.template.setAll({
+    tooltipText: "{name}: {value}"
   });
 
-  // Clean up function
-  return () => {
-    root.dispose();
-  };
+  polygonSeries.mapPolygons.template.states.create("hover", {
+    fill: am5.color(0x297fb8)
+  });
 }
-
 
 function createTimewiseSalesChart(root: am5.Root, data: SaleData[]) {
   const chart = root.container.children.push(
@@ -530,7 +516,6 @@ function createTimewiseSalesChart(root: am5.Root, data: SaleData[]) {
     })
   );
 
-  // Create axes
   const xAxis = chart.xAxes.push(
     am5xy.DateAxis.new(root, {
       baseInterval: { timeUnit: "hour", count: 1 },
@@ -545,7 +530,6 @@ function createTimewiseSalesChart(root: am5.Root, data: SaleData[]) {
     })
   );
 
-  // Create series
   const series = chart.series.push(
     am5xy.LineSeries.new(root, {
       name: "Sales",
@@ -559,13 +543,13 @@ function createTimewiseSalesChart(root: am5.Root, data: SaleData[]) {
     })
   );
 
-  // Process data
   const processedData = data.map(item => ({
     date: new Date(`${item.saleDate} ${item.saleTime}`).getTime(),
     amount: item.amount
   })).sort((a, b) => a.date - b.date);
 
   series.data.setAll(processedData);
+  chart.set("cursor", am5xy.XYCursor.new(root, {}));
 }
 
 function createProductDiscountwiseChart(root: am5.Root, data: SaleData[]) {
@@ -578,7 +562,6 @@ function createProductDiscountwiseChart(root: am5.Root, data: SaleData[]) {
     })
   );
 
-  // Create axes
   const xAxis = chart.xAxes.push(
     am5xy.CategoryAxis.new(root, {
       categoryField: "product",
@@ -595,7 +578,6 @@ function createProductDiscountwiseChart(root: am5.Root, data: SaleData[]) {
     })
   );
 
-  // Create series
   const series = chart.series.push(
     am5xy.ColumnSeries.new(root, {
       name: "Discount",
@@ -609,7 +591,6 @@ function createProductDiscountwiseChart(root: am5.Root, data: SaleData[]) {
     })
   );
 
-  // Process data
   const processedData = Object.entries(
     data.reduce((acc: { [key: string]: number }, item) => {
       acc[item.product] = (acc[item.product] || 0) + item.discount;
@@ -619,6 +600,15 @@ function createProductDiscountwiseChart(root: am5.Root, data: SaleData[]) {
 
   xAxis.data.setAll(processedData);
   series.data.setAll(processedData);
+  xAxis.get("renderer").labels.template.setAll({
+    oversizedBehavior: "wrap",
+    maxWidth: 150,
+    rotation: -45,
+    centerY: am5.p50,
+    centerX: am5.p100,
+    paddingRight: 15
+  });
+  chart.set("cursor", am5xy.XYCursor.new(root, {}));
 }
 
 function createProductwiseQtyChart(root: am5.Root, data: SaleData[]) {
@@ -629,7 +619,6 @@ function createProductwiseQtyChart(root: am5.Root, data: SaleData[]) {
     })
   );
 
-  // Create series
   const series = chart.series.push(
     am5percent.PieSeries.new(root, {
       name: "Quantity",
@@ -641,7 +630,6 @@ function createProductwiseQtyChart(root: am5.Root, data: SaleData[]) {
     })
   );
 
-  // Process data
   const processedData = Object.entries(
     data.reduce((acc: { [key: string]: number }, item) => {
       acc[item.product] = (acc[item.product] || 0) + item.quantity;
@@ -653,7 +641,6 @@ function createProductwiseQtyChart(root: am5.Root, data: SaleData[]) {
 }
 
 function createProductwiseDiscountChart(root: am5.Root, data: SaleData[]) {
-  // Create chart
   const chart = root.container.children.push(
     am5xy.XYChart.new(root, {
       panY: true,
@@ -663,7 +650,6 @@ function createProductwiseDiscountChart(root: am5.Root, data: SaleData[]) {
     })
   );
 
-  // Create X-axis (categories - products)
   const xAxis = chart.xAxes.push(
     am5xy.CategoryAxis.new(root, {
       categoryField: "product",
@@ -676,14 +662,12 @@ function createProductwiseDiscountChart(root: am5.Root, data: SaleData[]) {
     })
   );
 
-  // Create Y-axis (values - discount amounts)
   const yAxis = chart.yAxes.push(
     am5xy.ValueAxis.new(root, {
       renderer: am5xy.AxisRendererY.new(root, {})
     })
   );
 
-  // Create series
   const series = chart.series.push(
     am5xy.ColumnSeries.new(root, {
       name: "Discount",
@@ -697,22 +681,6 @@ function createProductwiseDiscountChart(root: am5.Root, data: SaleData[]) {
     })
   );
 
-  // Style the bars
-  series.columns.template.setAll({
-    cornerRadiusTL: 3,
-    cornerRadiusTR: 3,
-    strokeOpacity: 0,
-    fillGradient: am5.LinearGradient.new(root, {
-      stops: [{
-        color: am5.color(0x67B7DC)
-      }, {
-        color: am5.color(0x297FB8)
-      }],
-      rotation: 90
-    })
-  });
-
-  // Prepare and set data
   const processedData = Object.entries(
     data.reduce((acc: { [key: string]: number }, item) => {
       acc[item.product] = (acc[item.product] || 0) + item.discount;
@@ -721,25 +689,19 @@ function createProductwiseDiscountChart(root: am5.Root, data: SaleData[]) {
   )
     .map(([product, discount]) => ({ 
       product, 
-      discount: Number(discount.toFixed(2))  // Round to 2 decimal places
+      discount: Number(discount.toFixed(2))
     }))
-    .sort((a, b) => b.discount - a.discount); // Sort by discount amount descending
+    .sort((a, b) => b.discount - a.discount);
 
   xAxis.data.setAll(processedData);
   series.data.setAll(processedData);
 
-  // Add cursor
   chart.set("cursor", am5xy.XYCursor.new(root, {
     behavior: "none",
     xAxis: xAxis,
     yAxis: yAxis
   }));
 
-  // Make stuff animate on load
-  series.appear(1000);
-  chart.appear(1000, 100);
-
-  // Enable axis labels rotation if needed
   xAxis.get("renderer").labels.template.setAll({
     oversizedBehavior: "wrap",
     maxWidth: 150,
@@ -748,8 +710,6 @@ function createProductwiseDiscountChart(root: am5.Root, data: SaleData[]) {
     centerX: am5.p100,
     paddingRight: 15
   });
-
-  return chart;
 }
 
 function createGaugeChart(root: am5.Root, title: string, value: number, max: number) {
@@ -839,269 +799,6 @@ function createGaugeChart(root: am5.Root, title: string, value: number, max: num
 
   // Animate series on load
   series.appear(1000, 100);
-
-  return chart;
-}
-function createProductwiseSalesChart(root: am5.Root, data: SaleData[]) {
-  // Create chart
-  const chart = root.container.children.push(
-    am5xy.XYChart.new(root, {
-      panY: true,
-      wheelY: "zoomY",
-      layout: root.verticalLayout,
-      maxTooltipDistance: 0
-    })
-  );
-
-  // Create axes
-  const xAxis = chart.xAxes.push(
-    am5xy.CategoryAxis.new(root, {
-      categoryField: "product",
-      renderer: am5xy.AxisRendererX.new(root, {
-        minGridDistance: 30,
-        cellStartLocation: 0.1,
-        cellEndLocation: 0.9
-      }),
-      tooltip: am5.Tooltip.new(root, {})
-    })
-  );
-
-  const yAxis = chart.yAxes.push(
-    am5xy.ValueAxis.new(root, {
-      renderer: am5xy.AxisRendererY.new(root, {})
-    })
-  );
-
-  // Create series
-  const series = chart.series.push(
-    am5xy.ColumnSeries.new(root, {
-      name: "Sales",
-      xAxis: xAxis,
-      yAxis: yAxis,
-      valueYField: "amount",
-      categoryXField: "product",
-      tooltip: am5.Tooltip.new(root, {
-        labelText: "Sales: ${valueY}"
-      })
-    })
-  );
-
-  // Style the columns
-  series.columns.template.setAll({
-    cornerRadiusTL: 3,
-    cornerRadiusTR: 3,
-    strokeOpacity: 0,
-    fillGradient: am5.LinearGradient.new(root, {
-      stops: [{
-        color: am5.color(0x67B7DC)
-      }, {
-        color: am5.color(0x297FB8)
-      }],
-      rotation: 90
-    })
-  });
-
-  // Process and set data
-  const processedData = Object.entries(
-    data.reduce((acc: { [key: string]: number }, item) => {
-      acc[item.product] = (acc[item.product] || 0) + item.amount;
-      return acc;
-    }, {})
-  )
-    .map(([product, amount]) => ({ 
-      product, 
-      amount: Number(amount.toFixed(2))
-    }))
-    .sort((a, b) => b.amount - a.amount);
-
-  xAxis.data.setAll(processedData);
-  series.data.setAll(processedData);
-
-  // Add cursor
-  chart.set("cursor", am5xy.XYCursor.new(root, {
-    behavior: "none",
-    xAxis: xAxis,
-    yAxis: yAxis
-  }));
-
-  // Configure axis labels
-  xAxis.get("renderer").labels.template.setAll({
-    oversizedBehavior: "wrap",
-    maxWidth: 150,
-    rotation: -45,
-    centerY: am5.p50,
-    centerX: am5.p100,
-    paddingRight: 15
-  });
-
-  // Animate
-  series.appear(1000);
-  chart.appear(1000, 100);
-
-  return chart;
-}
-
-function createProductwiseQuantityPieChart(root: am5.Root, data: SaleData[]) {
-  // Create chart
-  const chart = root.container.children.push(
-    am5percent.PieChart.new(root, {
-      layout: root.verticalLayout,
-      innerRadius: am5.percent(50)
-    })
-  );
-
-  // Create series
-  const series = chart.series.push(
-    am5percent.PieSeries.new(root, {
-      valueField: "quantity",
-      categoryField: "product",
-      alignLabels: false,
-      legendValueText: "{value}",
-      legendLabelText: "{category}",
-      tooltip: am5.Tooltip.new(root, {
-        labelText: "{category}: {value}"
-      })
-    })
-  );
-
-  // Customize slices
-  series.slices.template.setAll({
-    strokeWidth: 2,
-    stroke: am5.color(0xffffff)
-  });
-
-  // Add legend
-  const legend = chart.children.push(
-    am5.Legend.new(root, {
-      centerX: am5.percent(50),
-      x: am5.percent(50),
-      marginTop: 15,
-      marginBottom: 15
-    })
-  );
-
-  legend.data.setAll(series.dataItems);
-
-  // Process data
-  const processedData = Object.entries(
-    data.reduce((acc: { [key: string]: number }, item) => {
-      acc[item.product] = (acc[item.product] || 0) + item.quantity;
-      return acc;
-    }, {})
-  )
-    .map(([product, quantity]) => ({
-      product,
-      quantity: Number(quantity)
-    }))
-    .sort((a, b) => b.quantity - a.quantity);
-
-  // Set data
-  series.data.setAll(processedData);
-
-  // Animate
-  series.appear(1000, 100);
-
-  return chart;
-}
-
-function createProductwiseDiscountBarChart(root: am5.Root, data: SaleData[]) {
-  // Create chart
-  const chart = root.container.children.push(
-    am5xy.XYChart.new(root, {
-      panX: true,
-      panY: false,
-      wheelX: "panX",
-      wheelY: "none",
-      layout: root.verticalLayout
-    })
-  );
-
-  // Create axes
-  const xAxis = chart.xAxes.push(
-    am5xy.CategoryAxis.new(root, {
-      categoryField: "product",
-      renderer: am5xy.AxisRendererX.new(root, {
-        minGridDistance: 30
-      }),
-      tooltip: am5.Tooltip.new(root, {})
-    })
-  );
-
-  const yAxis = chart.yAxes.push(
-    am5xy.ValueAxis.new(root, {
-      renderer: am5xy.AxisRendererY.new(root, {}),
-      numberFormat: "${value}"
-    })
-  );
-
-  // Create series
-  const series = chart.series.push(
-    am5xy.ColumnSeries.new(root, {
-      name: "Discount",
-      xAxis: xAxis,
-      yAxis: yAxis,
-      valueYField: "discount",
-      categoryXField: "product",
-      tooltip: am5.Tooltip.new(root, {
-        labelText: "Discount: ${valueY}"
-      })
-    })
-  );
-
-  // Style columns
-  series.columns.template.setAll({
-    tooltipY: 0,
-    tooltipText: "{categoryX}: ${valueY}",
-    cornerRadiusTL: 5,
-    cornerRadiusTR: 5,
-    strokeOpacity: 0,
-    fillGradient: am5.LinearGradient.new(root, {
-      stops: [{
-        color: am5.color(0xFF8C00)
-      }, {
-        color: am5.color(0xFFA500)
-      }],
-      rotation: 90
-    })
-  });
-
-  // Process data
-  const processedData = Object.entries(
-    data.reduce((acc: { [key: string]: number }, item) => {
-      acc[item.product] = (acc[item.product] || 0) + item.discount;
-      return acc;
-    }, {})
-  )
-    .map(([product, discount]) => ({
-      product,
-      discount: Number(discount.toFixed(2))
-    }))
-    .sort((a, b) => b.discount - a.discount);
-
-  // Set data
-  xAxis.data.setAll(processedData);
-  series.data.setAll(processedData);
-
-  // Configure axis labels
-  xAxis.get("renderer").labels.template.setAll({
-    oversizedBehavior: "wrap",
-    maxWidth: 120,
-    rotation: -45,
-    centerY: am5.p50,
-    centerX: am5.p100,
-    paddingRight: 15
-  });
-
-  // Add cursor
-  chart.set("cursor", am5xy.XYCursor.new(root, {
-    behavior: "none",
-    xAxis: xAxis,
-    yAxis: yAxis
-  }));
-
-  // Animate
-  series.appear(1000);
-  chart.appear(1000, 100);
 
   return chart;
 }
